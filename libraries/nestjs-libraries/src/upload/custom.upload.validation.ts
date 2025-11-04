@@ -22,7 +22,8 @@ export class CustomFileValidationPipe implements PipeTransform {
     const maxSize = this.getMaxSize(value.mimetype);
     const validation =
       (value.mimetype.startsWith('image/') ||
-        value.mimetype.startsWith('video/mp4')) &&
+        value.mimetype.startsWith('video/mp4') ||
+        value.mimetype === 'application/pdf') &&
       value.size <= maxSize;
 
     if (validation) {
@@ -39,6 +40,8 @@ export class CustomFileValidationPipe implements PipeTransform {
       return 10 * 1024 * 1024; // 10 MB
     } else if (mimeType.startsWith('video/')) {
       return 1024 * 1024 * 1024; // 1 GB
+    } else if (mimeType === 'application/pdf') {
+      return 20 * 1024 * 1024; // 20 MB limit for PDFs
     } else {
       throw new BadRequestException('Unsupported file type.');
     }
