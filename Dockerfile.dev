@@ -88,6 +88,9 @@ COPY --from=builder /app/libraries ./libraries
 COPY --from=builder /app/apps ./apps
 COPY --from=builder /app/libraries ./libraries
 
+# Copy PM2 ecosystem configuration
+COPY ecosystem.config.js /app/ecosystem.config.js
+
 # Set permissions for www user
 RUN chown -R www:www /app /uploads && \
     chmod -R 755 /app
