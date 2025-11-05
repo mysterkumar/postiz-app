@@ -1,21 +1,133 @@
-FROM node:22-alpine
-ARG NEXT_PUBLIC_VERSION
-ENV NEXT_PUBLIC_VERSION=$NEXT_PUBLIC_VERSION
-RUN apk add --no-cache g++ make py3-pip bash nginx
-RUN adduser -D -g 'www' www
-RUN mkdir /www
-RUN chown -R www:www /var/lib/nginx
-RUN chown -R www:www /www
+# ============================================================================
+# Multi-stage build for Postiz with custom backend PDF upload feature
+# Base: node:22-alpine with production optimizations
+# ============================================================================
 
+FROM node:22-alpine AS base
 
-RUN npm --no-update-notifier --no-fund --global install pnpm@10.6.1 pm2
+# Install system dependencies
+RUN apk add --no-cache \
+    g++ \
+    make \
+    py3-pip \
+    bash \
+    nginx
 
+# Create nginx user and set permissions (matching official Postiz image)
+RUN addgroup -g 82 -S www && \
+    adduser -u 82 -S www -G www && \
+    mkdir -p /var/log/nginx /var/cache/nginx /uploads && \
+    chown -R www:www /var/log/nginx /var/cache/nginx /uploads && \
+    chmod -R 755 /uploads
+
+# ============================================================================
+# Builder stage
+# ============================================================================
+
+FROM base AS builder
+
+# Install pnpm globally
+RUN npm install -g pnpm@10.6.1
+
+# Set working directory
 WORKDIR /app
 
-COPY . /app
+# Copy package files
+COPY pnpm-lock.yaml package.json ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Copy nginx configuration
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 
-RUN pnpm install
-RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build
+# Build with optimized memory settings
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN pnpm run build
 
+# ============================================================================
+# Production stage (lightweight final image)
+# ============================================================================
+
+FROM node:22-alpine AS production
+
+# Install runtime dependencies only
+RUN apk add --no-cache \
+    g++ \
+    make \
+    bash \
+    nginx
+
+# Create nginx user and set permissions
+RUN addgroup -g 82 -S www && \
+    adduser -u 82 -S www -G www && \
+    mkdir -p /var/log/nginx /var/cache/nginx /uploads && \
+    chown -R www:www /var/log/nginx /var/cache/nginx /uploads && \
+    chmod -R 755 /uploads
+
+# Install global tools
+RUN npm install -g pnpm@10.6.1 pm2
+
+# Set working directory
+WORKDIR /app
+
+# Copy nginx configuration from builder
+COPY var/docker/nginx.conf /etc/nginx/nginx.conf
+
+# Copy built application and node_modules from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
+
+# Copy any other necessary files (backend, frontend, workers, cron scripts)
+COPY --from=builder /app/apps ./apps
+COPY --from=builder /app/libs ./libs
+
+# Set permissions for www user
+RUN chown -R www:www /app /uploads && \
+    chmod -R 755 /app
+
+# ============================================================================
+# Environment Variables Configuration
+# ============================================================================
+
+# Postiz Core Configuration
+ENV NODE_ENV=production \
+    PORT=3000 \
+    FRONTEND_PORT=4200
+
+# Cloudflare R2 PDF Upload Configuration (Custom Backend Feature)
+ENV CLOUDFLARE_ACCOUNT_ID="" \
+    CLOUDFLARE_ACCESS_KEY="" \
+    CLOUDFLARE_SECRET_ACCESS_KEY="" \
+    CLOUDFLARE_BUCKETNAME="" \
+    CLOUDFLARE_REGION="" \
+    CLOUDFLARE_BUCKET_URL=""
+
+# Optional: Additional PDF upload configuration
+ENV PDF_UPLOAD_ENABLED=true \
+    PDF_UPLOAD_MAX_SIZE=52428800
+
+# Expose ports
+# 5000: Nginx proxy
+# 3000: Backend API
+# 4200: Frontend
+EXPOSE 5000 3000 4200
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:5000/api/health || exit 1
+
+# ============================================================================
+# Start Process
+# ============================================================================
+
+# Switch to www user for security
+USER www
+
+# Start nginx and Postiz services via pm2
 CMD ["sh", "-c", "nginx && pnpm run pm2"]
