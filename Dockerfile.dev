@@ -13,12 +13,13 @@ RUN apk add --no-cache \
     bash \
     nginx
 
-# Create nginx user and set permissions (matching official Postiz image)
-RUN addgroup -g 82 -S www && \
-    adduser -u 82 -S www -G www && \
+# Create nginx user safely (skip if already exists)
+RUN addgroup -S www 2>/dev/null || true && \
+    adduser -S www -G www 2>/dev/null || true && \
     mkdir -p /var/log/nginx /var/cache/nginx /uploads && \
     chown -R www:www /var/log/nginx /var/cache/nginx /uploads && \
     chmod -R 755 /uploads
+
 
 # ============================================================================
 # Builder stage
