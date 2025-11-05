@@ -30,17 +30,16 @@ FROM base AS builder
 # Install pnpm globally
 RUN npm install -g pnpm@10.6.1
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy lockfile and package for layer caching
 COPY pnpm-lock.yaml package.json ./
 
-# Install dependencies
-RUN pnpm install --no-frozen-lockfile
-
-# Copy source code
+# Copy the full source code before installing
 COPY . .
+
+# Install dependencies after copying schema files
+RUN pnpm install --no-frozen-lockfile
 
 # Copy nginx configuration
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
