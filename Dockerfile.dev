@@ -53,6 +53,9 @@ RUN --mount=type=cache,target=/app/.cache/pnpm \
 RUN --mount=type=cache,target=/app/.cache/pnpm \
     pnpm run build
 
+# Build backend to ensure dist/main.js exists for PM2 runtime
+RUN pnpm run build:backend
+
 # Copy nginx configuration
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 
